@@ -12,7 +12,7 @@ function fairRandom(nonce, min, max) {
   const hash = generateHMAC(secretKey, nonce);
   const decimal = parseInt(hash.substring(0, 8), 16);
   return {
-    value: (decimal % (max - min + 1)) + min,
+    roll: (decimal % (max - min + 1)) + min,
     key: secretKey,
     hmac: hash,
   };
@@ -24,7 +24,7 @@ function rollDice(die, nonce) {
     throw new Error("Invalid dice configuration");
   }
   const roll = fairRandom(nonce, 0, die.length - 1);
-  return { roll: die[roll.value], key: roll.key, hmac: roll.hmac };
+  return { roll: die[roll.roll], key: roll.key, hmac: roll.hmac };
 }
 
 // Parse dice from command-line arguments
@@ -37,15 +37,15 @@ function playGame(diceSet) {
   console.log("⚔️ Non-Transitive Dice Game Begins!");
 
   // Determine first move
-  const nonceFirstMove = "firstMove";
+  const nonceFirstMove = crypto.randomBytes(32).toString("hex");
   const firstMove = fairRandom(nonceFirstMove, 0, 1);
   console.log(
     `I selected a random value in the range 0..1 (HMAC=${firstMove.hmac}).`
   );
   const userGuess = readline.question("Try to guess my selection (0 or 1): ");
-  console.log(`My selection: ${firstMove.value} (KEY=${firstMove.key}).`);
+  console.log(`My selection: ${firstMove.roll} (KEY=${firstMove.key}).`);
 
-  const userMovesFirst = parseInt(userGuess) === firstMove.value;
+  const userMovesFirst = parseInt(userGuess) === firstMove.roll;
   console.log(
     userMovesFirst ? "You make the first move." : "I make the first move."
   );
@@ -69,7 +69,7 @@ function playGame(diceSet) {
 
   // Rolling the dice
   console.log("It's time for my roll.");
-  const nonceOpponent = "opponentRoll";
+  const nonceOpponent = crypto.randomBytes(32).toString("hex");
   const opponentRoll = rollDice(opponentDice, nonceOpponent);
   console.log(
     `I selected a random value in the range 0..5 (HMAC=${opponentRoll.hmac}).`
@@ -79,16 +79,16 @@ function playGame(diceSet) {
   for (let i = 0; i < 6; i++) console.log(`${i} - ${i}`);
   const userMod = parseInt(readline.question("Your selection: "));
 
-  console.log(`My number is ${opponentRoll.value} (KEY=${opponentRoll.key}).`);
+  console.log(`My number is ${opponentRoll.roll} (KEY=${opponentRoll.key}).`);
   console.log(
-    `The fair number generation result is ${
-      opponentRoll.value
-    } + ${userMod} = ${(opponentRoll.value + userMod) % 6} (mod 6).`
+    `The fair number generation result is ${opponentRoll.roll} + ${userMod} = ${
+      (opponentRoll.roll + userMod) % 6
+    } (mod 6).`
   );
   console.log(`My roll result is ${opponentRoll.roll}.`);
 
   console.log("It's time for your roll.");
-  const nonceUser = "userRoll";
+  const nonceUser = crypto.randomBytes(32).toString("hex");
   const userRoll = rollDice(userDice, nonceUser);
   console.log(
     `I selected a random value in the range 0..5 (HMAC=${userRoll.hmac}).`
@@ -98,11 +98,11 @@ function playGame(diceSet) {
   for (let i = 0; i < 6; i++) console.log(`${i} - ${i}`);
   const userFinalMod = parseInt(readline.question("Your selection: "));
 
-  console.log(`My number is ${userRoll.value} (KEY=${userRoll.key}).`);
+  console.log(`My number is ${userRoll.roll} (KEY=${userRoll.key}).`);
   console.log(
     `The fair number generation result is ${
-      userRoll.value
-    } + ${userFinalMod} = ${(userRoll.value + userFinalMod) % 6} (mod 6).`
+      userRoll.roll
+    } + ${userFinalMod} = ${(userRoll.roll + userFinalMod) % 6} (mod 6).`
   );
   console.log(`Your roll result is ${userRoll.roll}.`);
 
