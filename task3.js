@@ -1,180 +1,155 @@
 const crypto = require("crypto");
-const readline = require("readline-sync");
+const readline = require("readline");
 
-class FairRandomGenerator {
-  static generateHMAC(secretKey, data) {
-    return crypto.createHmac("sha3-256", secretKey).update(data).digest("hex");
-  }
-
-  static generateRandomValue(min, max) {
-    const range = max - min + 1;
-    let randomValue;
-    do {
-      const randomBytes = crypto.randomBytes(4);
-      randomValue = randomBytes.readUInt32BE() >>> 0;
-    } while (randomValue >= Math.floor(0xffffffff / range) * range);
-    return min + (randomValue % range);
-  }
-
-  static fairRandom(nonce, min, max) {
-    const secretKey = crypto.randomBytes(32).toString("hex");
-    const value = this.generateRandomValue(min, max);
-    const hmac = this.generateHMAC(secretKey, nonce);
-    return { value, key: secretKey, hmac };
-  }
-}
-
-class Dice {
-  constructor(values) {
-    this.values = values;
-  }
-
-  roll(nonce) {
-    const roll = FairRandomGenerator.fairRandom(
-      nonce,
-      0,
-      this.values.length - 1
-    );
-    return {
-      roll: this.values[roll.value],
-      key: roll.key,
-      hmac: roll.hmac,
-      index: roll.value,
-    };
-  }
-}
-
-class Game {
-  constructor(diceSet) {
-    this.diceSet = diceSet.map((die) => new Dice(die));
-  }
-
-  play() {
-    console.log("⚔️ Non-Transitive Dice Game Begins!");
-
-    const firstMove = FairRandomGenerator.fairRandom("firstMove", 0, 1);
-    console.log(
-      `I selected a random value in the range 0..1 (HMAC=${firstMove.hmac}).`
-    );
-    let userGuess;
-    do {
-      userGuess = readline.question("Try to guess my selection (0 or 1): ");
-    } while (!["0", "1"].includes(userGuess));
-
-    console.log(`My selection: ${firstMove.value} (KEY=${firstMove.key}).`);
-
-    const userMovesFirst = parseInt(userGuess) === firstMove.value;
-    console.log(
-      userMovesFirst ? "You make the first move." : "I make the first move."
-    );
-
-    console.log("Choose your dice:");
-    this.diceSet.forEach((die, index) =>
-      console.log(`${index} - ${die.values.join(",")}`)
-    );
-
-    let userSelection;
-    do {
-      userSelection = parseInt(readline.question("Your selection: "));
-    } while (
-      isNaN(userSelection) ||
-      userSelection < 0 ||
-      userSelection >= this.diceSet.length
-    );
-
-    const userDice = this.diceSet[userSelection];
-    console.log(`You selected: ${userDice.values.join(",")}`);
-
-    const opponentSelection = FairRandomGenerator.fairRandom(
-      "opponentChoice",
-      0,
-      this.diceSet.length - 1
-    ).value;
-    const opponentDice = this.diceSet[opponentSelection];
-    console.log(`I choose the ${opponentDice.values.join(",")} dice.`);
-
-    console.log("It's time for my roll.");
-    const opponentRoll = opponentDice.roll("opponentRoll");
-    console.log(
-      `I selected a random value in the range 0..${
-        opponentDice.values.length - 1
-      } (HMAC=${opponentRoll.hmac}).`
-    );
-
-    console.log("Add your number modulo your dice size.");
-    for (let i = 0; i < userDice.values.length; i++) console.log(`${i} - ${i}`);
-    let userMod;
-    do {
-      userMod = parseInt(readline.question("Your selection: "));
-    } while (
-      isNaN(userMod) ||
-      userMod < 0 ||
-      userMod >= userDice.values.length
-    );
-
-    console.log(
-      `My number is ${opponentRoll.index} (KEY=${opponentRoll.key}).`
-    );
-    console.log(
-      `The fair number generation result is ${
-        opponentRoll.index
-      } + ${userMod} = ${
-        (opponentRoll.index + userMod) % userDice.values.length
-      } (mod ${userDice.values.length}).`
-    );
-    console.log(`My roll result is ${opponentRoll.roll}.`);
-
-    console.log("It's time for your roll.");
-    const userRoll = userDice.roll("userRoll");
-    console.log(
-      `I selected a random value in the range 0..${
-        userDice.values.length - 1
-      } (HMAC=${userRoll.hmac}).`
-    );
-
-    console.log("Add your number modulo your dice size.");
-    for (let i = 0; i < userDice.values.length; i++) console.log(`${i} - ${i}`);
-    let userFinalMod;
-    do {
-      userFinalMod = parseInt(readline.question("Your selection: "));
-    } while (
-      isNaN(userFinalMod) ||
-      userFinalMod < 0 ||
-      userFinalMod >= userDice.values.length
-    );
-
-    console.log(`My number is ${userRoll.index} (KEY=${userRoll.key}).`);
-    console.log(
-      `The fair number generation result is ${
-        userRoll.index
-      } + ${userFinalMod} = ${
-        (userRoll.index + userFinalMod) % userDice.values.length
-      } (mod ${userDice.values.length}).`
-    );
-    console.log(`Your roll result is ${userRoll.roll}.`);
-
-    console.log(
-      userRoll.roll > opponentRoll.roll
-        ? "You win! 🎉"
-        : userRoll.roll < opponentRoll.roll
-        ? "I win! 🤖"
-        : "It's a tie! 🔄"
-    );
-  }
-}
-
-const diceSet = process.argv.slice(2).map((arg) => arg.split(",").map(Number));
-if (diceSet.length < 2) {
-  console.error("Error: At least two dice sets are required.");
-  process.exit(1);
-}
-
-diceSet.forEach((die, index) => {
-  if (die.length < 2) {
-    console.error(`Error: Dice ${index} must have at least two values.`);
-    process.exit(1);
-  }
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout,
 });
 
-const game = new Game(diceSet);
-game.play();
+function generateRandomKey() {
+  return crypto.randomBytes(32);
+}
+
+function computeHMAC(key, message) {
+  return crypto.createHmac("sha3-256", key).update(message).digest("hex");
+}
+
+function getRandomInt(max) {
+  return crypto.randomInt(0, max);
+}
+
+function fairRoll(dice) {
+  const key = generateRandomKey();
+  const randomIndex = getRandomInt(dice.length);
+  const hmac = computeHMAC(key, randomIndex.toString());
+
+  console.log(
+    `I selected a random value in the range 0..${
+      dice.length - 1
+    } (HMAC=${hmac}).`
+  );
+  console.log(
+    "Add your number modulo",
+    dice.length,
+    "to ensure fairness of the roll."
+  );
+
+  return new Promise((resolve) => {
+    rl.question("Your selection: ", (userInput) => {
+      if (userInput.toUpperCase() === "X") {
+        rl.close();
+        process.exit();
+      }
+
+      const userValue = parseInt(userInput, 10);
+      if (isNaN(userValue) || userValue < 0 || userValue >= dice.length) {
+        console.log("Invalid input. Try again.");
+        return resolve(fairRoll(dice));
+      }
+
+      const finalValue = (userValue + randomIndex) % dice.length;
+      console.log(`My number is ${randomIndex} (KEY=${key.toString("hex")}).`);
+      console.log(
+        `The result is ${randomIndex} + ${userValue} = ${finalValue} (mod ${dice.length}).`
+      );
+      resolve(dice[finalValue]);
+    });
+  });
+}
+
+async function playGame(diceSets) {
+  console.log("Let's determine who makes the first move.");
+  const key = generateRandomKey();
+  const computerChoice = getRandomInt(2);
+  const hmac = computeHMAC(key, computerChoice.toString());
+
+  console.log(`I selected a random value in the range 0..1 (HMAC=${hmac}).`);
+  console.log("Try to guess my selection.");
+  console.log("0 - 0\n1 - 1\nX - exit\n? - help");
+
+  let userGuess;
+  while (true) {
+    const input = await new Promise((resolve) =>
+      rl.question("Your selection: ", resolve)
+    );
+    if (input === "0" || input === "1") {
+      userGuess = parseInt(input, 10);
+      break;
+    }
+    if (input.toUpperCase() === "X") {
+      rl.close();
+      process.exit();
+    }
+    console.log("Invalid input. Enter 0 or 1.");
+  }
+
+  console.log(`My selection: ${computerChoice} (KEY=${key.toString("hex")}).`);
+  const computerStarts = userGuess !== computerChoice;
+
+  let computerDiceIndex = getRandomInt(diceSets.length);
+  console.log(
+    computerStarts
+      ? `I make the first move and choose the [${diceSets[computerDiceIndex]}] dice.`
+      : "You make the first move. Choose your dice:"
+  );
+
+  if (!computerStarts) {
+    computerDiceIndex = await userSelectsDice(diceSets);
+    if (computerDiceIndex === -1) return;
+  }
+
+  const userDiceIndex = computerStarts
+    ? await userSelectsDice(diceSets, computerDiceIndex)
+    : computerDiceIndex;
+  if (userDiceIndex === -1) return;
+  console.log(`You chose the [${diceSets[userDiceIndex]}] dice.`);
+
+  const computerRoll = await fairRoll(diceSets[computerDiceIndex]);
+  console.log(`It's time for my throw. My throw is ${computerRoll}.`);
+
+  const userRoll = await fairRoll(diceSets[userDiceIndex]);
+  console.log(`Your throw is ${userRoll}.`);
+
+  if (userRoll > computerRoll) console.log("You win!");
+  else if (userRoll < computerRoll) console.log("I win!");
+  else console.log("It's a tie!");
+
+  rl.close();
+}
+
+async function userSelectsDice(diceSets, excludeIndex = -1) {
+  console.log("Choose your dice:");
+  for (let i = 0; i < diceSets.length; i++) {
+    if (i !== excludeIndex) console.log(`${i} - ${diceSets[i]}`);
+  }
+  console.log("X - exit");
+
+  while (true) {
+    const input = await new Promise((resolve) =>
+      rl.question("Your selection: ", resolve)
+    );
+    if (input.toUpperCase() === "X") {
+      rl.close();
+      process.exit();
+    }
+    const choice = parseInt(input, 10);
+    if (
+      !isNaN(choice) &&
+      choice >= 0 &&
+      choice < diceSets.length &&
+      choice !== excludeIndex
+    ) {
+      return choice;
+    }
+    console.log("Invalid input. Try again.");
+  }
+}
+
+// Example usage
+const args = process.argv.slice(2);
+if (args.length < 3) {
+  console.log("Error: You must provide at least 3 dice configurations.");
+  process.exit(1);
+}
+const diceSets = args.map((d) => d.split(",").map(Number));
+playGame(diceSets);
