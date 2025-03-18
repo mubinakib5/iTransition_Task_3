@@ -1,124 +1,180 @@
 const crypto = require("crypto");
 const readline = require("readline-sync");
 
-class HMACGenerator {
-  static generateKey() {
-    return crypto.randomBytes(32).toString("hex");
-  }
-
-  static generateHMAC(key, message) {
-    return crypto.createHmac("sha3-256", key).update(message).digest("hex");
-  }
-}
-
 class FairRandomGenerator {
-  static generateRandom(min, max) {
-    const key = HMACGenerator.generateKey();
-    const randomBytes = crypto.randomBytes(4);
-    const randomValue = (randomBytes.readUInt32BE() % (max - min + 1)) + min;
-    const hmac = HMACGenerator.generateHMAC(key, randomValue.toString());
-    return { value: randomValue, key, hmac };
+  static generateHMAC(secretKey, data) {
+    return crypto.createHmac("sha3-256", secretKey).update(data).digest("hex");
+  }
+
+  static generateRandomValue(min, max) {
+    const range = max - min + 1;
+    let randomValue;
+    do {
+      const randomBytes = crypto.randomBytes(4);
+      randomValue = randomBytes.readUInt32BE() >>> 0;
+    } while (randomValue >= Math.floor(0xffffffff / range) * range);
+    return min + (randomValue % range);
+  }
+
+  static fairRandom(nonce, min, max) {
+    const secretKey = crypto.randomBytes(32).toString("hex");
+    const value = this.generateRandomValue(min, max);
+    const hmac = this.generateHMAC(secretKey, nonce);
+    return { value, key: secretKey, hmac };
   }
 }
 
-class DiceGame {
-  constructor(diceSet) {
-    this.diceSet = diceSet;
+class Dice {
+  constructor(values) {
+    this.values = values;
   }
 
-  determineFirstMove() {
-    const result = FairRandomGenerator.generateRandom(0, 1);
-    console.log(
-      `I selected a random value in the range 0..1 (HMAC=${result.hmac}).`
+  roll(nonce) {
+    const roll = FairRandomGenerator.fairRandom(
+      nonce,
+      0,
+      this.values.length - 1
     );
-    const userGuess = readline.question("Try to guess my selection (0 or 1): ");
-    console.log(`My selection: ${result.value} (KEY=${result.key}).`);
-    return parseInt(userGuess) === result.value;
-  }
-
-  selectDice() {
-    console.log("Choose your dice:");
-    this.diceSet.forEach((die, index) =>
-      console.log(`${index} - ${die.join(",")}`)
-    );
-    const userSelection = parseInt(readline.question("Your selection: "));
-    if (userSelection < 0 || userSelection >= this.diceSet.length) {
-      console.error("Error: Invalid dice selection.");
-      process.exit(1);
-    }
     return {
-      userDice: this.diceSet[userSelection],
-      opponentDice: this.diceSet[(userSelection + 1) % this.diceSet.length],
+      roll: this.values[roll.value],
+      key: roll.key,
+      hmac: roll.hmac,
+      index: roll.value,
     };
   }
+}
 
-  rollDice(dice) {
-    return FairRandomGenerator.generateRandom(0, dice.length - 1);
+class Game {
+  constructor(diceSet) {
+    this.diceSet = diceSet.map((die) => new Dice(die));
   }
 
   play() {
     console.log("⚔️ Non-Transitive Dice Game Begins!");
-    const userMovesFirst = this.determineFirstMove();
+
+    const firstMove = FairRandomGenerator.fairRandom("firstMove", 0, 1);
+    console.log(
+      `I selected a random value in the range 0..1 (HMAC=${firstMove.hmac}).`
+    );
+    let userGuess;
+    do {
+      userGuess = readline.question("Try to guess my selection (0 or 1): ");
+    } while (!["0", "1"].includes(userGuess));
+
+    console.log(`My selection: ${firstMove.value} (KEY=${firstMove.key}).`);
+
+    const userMovesFirst = parseInt(userGuess) === firstMove.value;
     console.log(
       userMovesFirst ? "You make the first move." : "I make the first move."
     );
 
-    const { userDice, opponentDice } = this.selectDice();
-    console.log(`You selected: ${userDice.join(",")}`);
-    console.log(`I choose the ${opponentDice.join(",")} dice.`);
+    console.log("Choose your dice:");
+    this.diceSet.forEach((die, index) =>
+      console.log(`${index} - ${die.values.join(",")}`)
+    );
+
+    let userSelection;
+    do {
+      userSelection = parseInt(readline.question("Your selection: "));
+    } while (
+      isNaN(userSelection) ||
+      userSelection < 0 ||
+      userSelection >= this.diceSet.length
+    );
+
+    const userDice = this.diceSet[userSelection];
+    console.log(`You selected: ${userDice.values.join(",")}`);
+
+    const opponentSelection = FairRandomGenerator.fairRandom(
+      "opponentChoice",
+      0,
+      this.diceSet.length - 1
+    ).value;
+    const opponentDice = this.diceSet[opponentSelection];
+    console.log(`I choose the ${opponentDice.values.join(",")} dice.`);
 
     console.log("It's time for my roll.");
-    const opponentRoll = this.rollDice(opponentDice);
+    const opponentRoll = opponentDice.roll("opponentRoll");
     console.log(
-      `I selected a random value in the range 0..5 (HMAC=${opponentRoll.hmac}).`
+      `I selected a random value in the range 0..${
+        opponentDice.values.length - 1
+      } (HMAC=${opponentRoll.hmac}).`
     );
-    console.log("Add your number modulo 6.");
-    for (let i = 0; i < 6; i++) console.log(`${i} - ${i}`);
-    const userMod = parseInt(readline.question("Your selection: "));
+
+    console.log("Add your number modulo your dice size.");
+    for (let i = 0; i < userDice.values.length; i++) console.log(`${i} - ${i}`);
+    let userMod;
+    do {
+      userMod = parseInt(readline.question("Your selection: "));
+    } while (
+      isNaN(userMod) ||
+      userMod < 0 ||
+      userMod >= userDice.values.length
+    );
+
     console.log(
-      `My number is ${opponentRoll.value} (KEY=${opponentRoll.key}).`
+      `My number is ${opponentRoll.index} (KEY=${opponentRoll.key}).`
     );
     console.log(
       `The fair number generation result is ${
-        (opponentRoll.value + userMod) % 6
-      } (mod 6).`
+        opponentRoll.index
+      } + ${userMod} = ${
+        (opponentRoll.index + userMod) % userDice.values.length
+      } (mod ${userDice.values.length}).`
     );
-    console.log(`My roll result is ${opponentDice[opponentRoll.value]}.`);
+    console.log(`My roll result is ${opponentRoll.roll}.`);
 
     console.log("It's time for your roll.");
-    const userRoll = this.rollDice(userDice);
+    const userRoll = userDice.roll("userRoll");
     console.log(
-      `I selected a random value in the range 0..5 (HMAC=${userRoll.hmac}).`
+      `I selected a random value in the range 0..${
+        userDice.values.length - 1
+      } (HMAC=${userRoll.hmac}).`
     );
-    console.log("Add your number modulo 6.");
-    for (let i = 0; i < 6; i++) console.log(`${i} - ${i}`);
-    const userFinalMod = parseInt(readline.question("Your selection: "));
-    console.log(`My number is ${userRoll.value} (KEY=${userRoll.key}).`);
+
+    console.log("Add your number modulo your dice size.");
+    for (let i = 0; i < userDice.values.length; i++) console.log(`${i} - ${i}`);
+    let userFinalMod;
+    do {
+      userFinalMod = parseInt(readline.question("Your selection: "));
+    } while (
+      isNaN(userFinalMod) ||
+      userFinalMod < 0 ||
+      userFinalMod >= userDice.values.length
+    );
+
+    console.log(`My number is ${userRoll.index} (KEY=${userRoll.key}).`);
     console.log(
       `The fair number generation result is ${
-        (userRoll.value + userFinalMod) % 6
-      } (mod 6).`
+        userRoll.index
+      } + ${userFinalMod} = ${
+        (userRoll.index + userFinalMod) % userDice.values.length
+      } (mod ${userDice.values.length}).`
     );
-    console.log(`Your roll result is ${userDice[userRoll.value]}.`);
+    console.log(`Your roll result is ${userRoll.roll}.`);
 
     console.log(
-      userDice[userRoll.value] > opponentDice[opponentRoll.value]
+      userRoll.roll > opponentRoll.roll
         ? "You win! 🎉"
-        : userDice[userRoll.value] < opponentDice[opponentRoll.value]
+        : userRoll.roll < opponentRoll.roll
         ? "I win! 🤖"
         : "It's a tie! 🔄"
     );
   }
 }
 
-function parseDice(args) {
-  return args.map((arg) => arg.split(",").map(Number));
-}
-
-const diceSet = parseDice(process.argv.slice(2));
+const diceSet = process.argv.slice(2).map((arg) => arg.split(",").map(Number));
 if (diceSet.length < 2) {
   console.error("Error: At least two dice sets are required.");
   process.exit(1);
 }
 
-new DiceGame(diceSet).play();
+diceSet.forEach((die, index) => {
+  if (die.length < 2) {
+    console.error(`Error: Dice ${index} must have at least two values.`);
+    process.exit(1);
+  }
+});
+
+const game = new Game(diceSet);
+game.play();
